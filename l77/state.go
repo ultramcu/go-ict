@@ -23,17 +23,23 @@ func (d *Device) FeedByte(b byte) {
 	case stateVersionGetting:
 		d.handleStateVersionGetting(b)
 	case stateChecksum1Getting:
+		d.mu.Lock()
 		d.Checksum[0] = b
+		d.mu.Unlock()
 		d.state = stateChecksum2Getting
 	case stateChecksum2Getting:
+		d.mu.Lock()
 		d.Checksum[1] = b
+		d.mu.Unlock()
 		d.state = stateCurrencyCodeGetting
 	case stateCurrencyCodeGetting:
 		d.handleStateCurrencyCodeGetting(b)
 	case stateSerialNumberGetting:
 		d.handleStateSerialNumberGetting(b)
 	case stateSensorStatusWaiting:
+		d.mu.Lock()
 		d.SensorStatus = b
+		d.mu.Unlock()
 		d.stateReset()
 	default:
 		// Unknown state -- defensively reset.
@@ -139,13 +145,16 @@ func (d *Device) handleStateWaitH2(b byte) {
 func (d *Device) handleStateGetBillType(b byte) {
 	d.currentBillType = BillType(b)
 	bill := d.currentBillType
+	d.mu.RLock()
+	mode := d.escrowMode
+	d.mu.RUnlock()
 	d.logL77("Bill Escrow, Type 0x%02X (%d), Mode %s\r\n",
-		b, bill.Value(), d.escrowMode.String())
+		b, bill.Value(), mode.String())
 
 	// AutoHold sends Hold immediately so the bill stays in escrow
 	// while the callback decides; the caller is then expected to
 	// invoke ReqBillAccept / ReqBillReject.
-	if d.escrowMode == AutoHold {
+	if mode == AutoHold {
 		_ = d.ReqBillHold()
 	}
 
@@ -153,7 +162,7 @@ func (d *Device) handleStateGetBillType(b byte) {
 		d.escrowCallback(d, bill)
 	}
 
-	switch d.escrowMode {
+	switch mode {
 	case AutoAccept:
 		_ = d.ReqBillAccept()
 	case AutoReject:
@@ -176,12 +185,16 @@ func (d *Device) handleStateInfoGetting(b byte) {
 	//   bytes  0..6  (7 chars) : model
 	//   byte   7     ' '       : separator
 	//   bytes  8..12 (5 chars) : manufacturer
+	d.mu.Lock()
 	if len(d.data) >= 13 {
 		d.Model = string(d.data[0:7])
 		d.Manufacturer = string(d.data[8:13])
 	}
-	if d.infoCallback != nil {
-		d.infoCallback(d, d.Model, d.Manufacturer)
+	model, manuf := d.Model, d.Manufacturer
+	cb := d.infoCallback
+	d.mu.Unlock()
+	if cb != nil {
+		cb(d, model, manuf)
 	}
 	d.stateReset()
 }
@@ -194,20 +207,38 @@ func (d *Device) handleStateVersionGetting(b byte) {
 	if d.dataCnt < versionPayloadLen {
 		return
 	}
+	d.mu.Lock()
 	d.Version = string(d.data)
+	d.mu.Unlock()
 	d.data = d.data[:0]
 	d.dataCnt = 0
 	d.state = stateChecksum1Getting
 }
 
+// maxCurrencyCodeLen bounds the '#'-terminated currency field. A real
+// currency code is only a few bytes; if the terminator is lost on a
+// noisy line we drop the frame rather than letting the buffer grow
+// without bound.
+const maxCurrencyCodeLen = 16
+
 // handleStateCurrencyCodeGetting collects bytes until the '#'
 // terminator, then fires the VersionCallback.
 func (d *Device) handleStateCurrencyCodeGetting(b byte) {
 	if b == currencyTerminator {
+		d.mu.Lock()
 		d.CurrencyCode = string(d.data)
-		if d.versionCallback != nil {
-			d.versionCallback(d, d.Version, string(d.Checksum[:]), d.CurrencyCode)
+		version, checksum, currency := d.Version, string(d.Checksum[:]), d.CurrencyCode
+		cb := d.versionCallback
+		d.mu.Unlock()
+		if cb != nil {
+			cb(d, version, checksum, currency)
 		}
+		d.stateReset()
+		return
+	}
+	if len(d.data) >= maxCurrencyCodeLen {
+		d.logL77("currency code exceeded %d bytes without terminator; resetting\r\n",
+			maxCurrencyCodeLen)
 		d.stateReset()
 		return
 	}
@@ -221,6 +252,8 @@ func (d *Device) handleStateSerialNumberGetting(b byte) {
 	if d.dataCnt < serialNumberLen {
 		return
 	}
+	d.mu.Lock()
 	d.SerialNumber = string(d.data)
+	d.mu.Unlock()
 	d.stateReset()
 }

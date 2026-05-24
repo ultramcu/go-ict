@@ -5,6 +5,7 @@ package sp1
 
 import (
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -29,6 +30,12 @@ const readChunk = 128
 // serial Read error.
 const readSleepOnError = 100 * time.Millisecond
 
+// readTimeout bounds each blocking serial read so Run wakes up
+// periodically to observe Close. Without it a read on an idle device
+// blocks indefinitely and Close cannot stop Run, leaking the goroutine
+// and the file descriptor.
+const readTimeout = 200 * time.Millisecond
+
 // drainTickInterval is the small inter-byte sleep the drainer goroutine
 // uses to avoid hammering the serial port at full CPU speed when there
 // is a long burst of queued bytes.
@@ -42,8 +49,9 @@ const drainTickInterval = 1 * time.Millisecond
 // bytes into an internal queue that a single drainer goroutine
 // pulls from.
 type Device struct {
-	cfg  serial.Config
-	port *serial.Port
+	cfg serial.Config
+	// port is typed as an interface so tests can inject a fake.
+	port io.ReadWriteCloser
 
 	muWrite sync.Mutex
 	muRead  sync.Mutex
@@ -65,7 +73,7 @@ type Device struct {
 // Close must not be called when err != nil.
 func New(port string, baud int, logf Logf) (*Device, error) {
 	d := &Device{
-		cfg:   serial.Config{Name: port, Baud: baud},
+		cfg:   serial.Config{Name: port, Baud: baud, ReadTimeout: readTimeout},
 		queue: newByteQueue(queueCapacity),
 		timer: newElapsedTimer(),
 		done:  make(chan struct{}),
@@ -141,11 +149,7 @@ func (d *Device) Close() error {
 // every CR (which commits a print job on the SP1), sleeps for the
 // remainder of `commitGap` before sending the next byte.
 func (d *Device) drainWriteQueue() {
-	const (
-		stIdle    = 0
-		stAfterCR = 1
-	)
-	st := stIdle
+	owesGap := false // set after every CR until the commit gap is paid
 
 	for {
 		b, ok := d.queue.Dequeue()
@@ -153,27 +157,28 @@ func (d *Device) drainWriteQueue() {
 			return // queue closed
 		}
 
-		switch st {
-		case stAfterCR:
+		if owesGap {
 			elapsed := d.timer.SinceLastCall()
 			if elapsed < commitGap {
 				wait := commitGap - elapsed
 				d.log("Idling %s after CR\r\n", wait)
 				time.Sleep(wait)
 			}
-			st = stIdle
-		case stIdle:
-			if b == CR {
-				// Reset the timer on the CR byte itself so the gap
-				// is measured from "CR was sent" rather than from
-				// the previous Idle->AfterCR transition.
-				_ = d.timer.SinceLastCall()
-				st = stAfterCR
-				d.log("CR queued; will idle %s before next byte\r\n", commitGap)
-			}
+			owesGap = false
 		}
 
 		d.hardwareWrite([]byte{b})
+
+		if b == CR {
+			// Measure the gap from the moment this CR was sent and
+			// require it before the next byte -- including when the
+			// next byte is itself a CR (back-to-back commits, which
+			// the previous state machine failed to pace).
+			_ = d.timer.SinceLastCall()
+			owesGap = true
+			d.log("CR sent; will idle %s before next byte\r\n", commitGap)
+		}
+
 		time.Sleep(drainTickInterval)
 	}
 }
@@ -194,8 +199,10 @@ func (d *Device) read(buf []byte) (int, error) {
 // which case it back-pressures the caller until the drainer makes
 // room.
 func (d *Device) Write(data []byte) int {
-	for _, b := range data {
-		d.queue.Enqueue(b)
+	for i, b := range data {
+		if !d.queue.Enqueue(b) {
+			return i // queue closed; report how many made it in
+		}
 	}
 	return len(data)
 }
@@ -205,7 +212,9 @@ func (d *Device) Write(data []byte) int {
 // matching code page for them to render correctly.
 func (d *Device) WriteString(s string) int {
 	for i := 0; i < len(s); i++ {
-		d.queue.Enqueue(s[i])
+		if !d.queue.Enqueue(s[i]) {
+			return i // queue closed; report how many made it in
+		}
 	}
 	return len(s)
 }
@@ -218,5 +227,12 @@ func (d *Device) hardwareWrite(data []byte) {
 	if d.port == nil {
 		return
 	}
-	_, _ = d.port.Write(data)
+	n, err := d.port.Write(data)
+	if err != nil {
+		d.logSP1("serial write failed: %v\r\n", err)
+		return
+	}
+	if n != len(data) {
+		d.logSP1("serial short write: %d of %d bytes\r\n", n, len(data))
+	}
 }

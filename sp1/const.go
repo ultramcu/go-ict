@@ -53,9 +53,10 @@ func (a Alignment) String() string {
 }
 
 // FontSize is the SP1's three font sizes, set with ESC M {0,1,2}.
-//   Small   ESC M 0  -- 8x13 glyphs, ~48 chars per line
-//   Normal  ESC M 1  -- 16x24 glyphs, ~24 chars per line
-//   Large   ESC M 2  -- 24x36 glyphs, ~16 chars per line
+//
+//	Small   ESC M 0  -- 8x13 glyphs, ~48 chars per line
+//	Normal  ESC M 1  -- 16x24 glyphs, ~24 chars per line
+//	Large   ESC M 2  -- 24x36 glyphs, ~16 chars per line
 type FontSize int
 
 const (

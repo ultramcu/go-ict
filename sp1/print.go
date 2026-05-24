@@ -123,10 +123,14 @@ func (d *Device) SetQRCodeSize(size int) {
 // GenerateQRCode emits a QR code containing `data`. Use SetQRCodeSize
 // first to control the module size.
 func (d *Device) GenerateQRCode(data string) {
-	mLSB := byte(len(data) % 256)
-	nMSB := byte(len(data) / 256)
+	if len(data) > 0xFFFF {
+		d.log("QR data %d bytes exceeds 65535; truncating\r\n", len(data))
+		data = data[:0xFFFF]
+	}
+	lenLo := byte(len(data) % 256) // low byte of the length
+	lenHi := byte(len(data) / 256) // high byte of the length
 	d.logCPU("Generate QR Code: %s\r\n", RemoveNewline(data))
-	d.Write([]byte{GS, 'k', QRCode, mLSB, nMSB})
+	d.Write([]byte{GS, 'k', QRCode, lenLo, lenHi})
 	d.WriteString(data)
 }
 

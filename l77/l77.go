@@ -5,6 +5,7 @@ package l77
 
 import (
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -26,6 +27,12 @@ const readChunk = 128
 // unavailable" while no bytes are buffered).
 const readSleepOnError = 100 * time.Millisecond
 
+// readTimeout bounds each blocking serial read so Run wakes up
+// periodically to observe Close (the done channel). Without it a read
+// on an idle device blocks indefinitely and Close cannot stop Run,
+// leaking the goroutine and the file descriptor.
+const readTimeout = 200 * time.Millisecond
+
 // Device represents one L77 attached to a serial port.
 //
 // Construct with New (or NewWithBaud), wire up callbacks, then start
@@ -36,8 +43,9 @@ type Device struct {
 	cfg serial.Config
 
 	// Underlying serial port. nil if the port could not be opened
-	// (in which case New also returns the error).
-	port *serial.Port
+	// (in which case New also returns the error). Typed as an
+	// interface so tests can inject a fake port.
+	port io.ReadWriteCloser
 
 	// Public, read-after-callback fields populated by the state
 	// machine. Callers should treat them as read-only and snapshot
@@ -66,6 +74,13 @@ type Device struct {
 	versionCallback  VersionCallback
 
 	escrowMode EscrowMode
+
+	// mu guards the fields that the Run goroutine writes (the public
+	// result fields above) and the fields the caller may mutate at
+	// runtime (escrowMode, infoCallback, versionCallback). It is never
+	// held while a user callback is invoked. Read the result fields
+	// from another goroutine via the Get* accessors, not directly.
+	mu sync.RWMutex
 
 	// Concurrency control. Read and write to the serial port are
 	// serialised; Close uses done+closeOnce to interrupt Run cleanly.
@@ -106,7 +121,7 @@ func NewWithBaud(
 	logf Logf,
 ) (*Device, error) {
 	d := &Device{
-		cfg:              serial.Config{Name: port, Baud: baud},
+		cfg:              serial.Config{Name: port, Baud: baud, ReadTimeout: readTimeout},
 		escrowCallback:   escrowCb,
 		stackingCallback: stackingCb,
 		rejectCallback:   rejectCb,
@@ -132,24 +147,86 @@ func NewWithBaud(
 
 // SetEscrowMode changes the escrow handling policy at runtime.
 func (d *Device) SetEscrowMode(mode EscrowMode) {
+	d.mu.Lock()
 	d.escrowMode = mode
+	d.mu.Unlock()
 }
 
 // EscrowMode returns the current escrow handling policy.
 func (d *Device) EscrowMode() EscrowMode {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	return d.escrowMode
 }
 
 // SetInfoCallback installs / replaces the info-frame callback.
 // Pass nil to disable.
 func (d *Device) SetInfoCallback(cb InfoCallback) {
+	d.mu.Lock()
 	d.infoCallback = cb
+	d.mu.Unlock()
 }
 
 // SetVersionCallback installs / replaces the version-frame callback.
 // Pass nil to disable.
 func (d *Device) SetVersionCallback(cb VersionCallback) {
+	d.mu.Lock()
 	d.versionCallback = cb
+	d.mu.Unlock()
+}
+
+// The Get* accessors return the most recently parsed values, read
+// under the lock so they are safe to call from a goroutine other than
+// the one running Run. Prefer these over reading the exported fields
+// directly when a search may be running concurrently.
+
+// GetModel returns the device model string from the last info frame.
+func (d *Device) GetModel() string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.Model
+}
+
+// GetManufacturer returns the manufacturer string from the last info frame.
+func (d *Device) GetManufacturer() string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.Manufacturer
+}
+
+// GetSerialNumber returns the serial number from the last serial-number frame.
+func (d *Device) GetSerialNumber() string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.SerialNumber
+}
+
+// GetVersion returns the firmware version from the last version frame.
+func (d *Device) GetVersion() string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.Version
+}
+
+// GetChecksum returns the firmware checksum from the last version frame.
+func (d *Device) GetChecksum() [2]byte {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.Checksum
+}
+
+// GetCurrencyCode returns the currency code from the last version frame.
+func (d *Device) GetCurrencyCode() string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.CurrencyCode
+}
+
+// GetSensorStatus returns the most recent sensor-status byte.
+func (d *Device) GetSensorStatus() byte {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.SensorStatus
 }
 
 // Run reads from the serial port and feeds every received byte
