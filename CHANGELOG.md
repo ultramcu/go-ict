@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-05-24
+
+### Fixed
+- **Restored the Go 1.18 build.** Pinned the transitive dependency
+  `golang.org/x/sys` to v0.30.0; a later release (v0.43.0) requires Go
+  1.25 — it imports the standard-library `slices` package — which broke
+  building on the module's declared Go 1.18 minimum. The termios syscalls
+  used by `tarm/serial` are stable across these `x/sys` versions, so the
+  pin is behaviour-preserving.
+
 ## [0.2.0] - 2026-05-24
 
 Reliability, concurrency, and testability pass. Public API signatures
