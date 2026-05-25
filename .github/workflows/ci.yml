@@ -23,7 +23,13 @@ jobs:
           go-version: ${{ matrix.go }}
       - run: go build ./...
       - run: go vet ./...
-      - run: go test -race -coverprofile=cover.out ./...
+      - run: go test -race -coverprofile=coverage.out ./...
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.out
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
   fmt:
     name: gofmt

@@ -1,6 +1,7 @@
 # go-ict
 
 [![CI](https://github.com/ultramcu/go-ict/actions/workflows/ci.yml/badge.svg)](https://github.com/ultramcu/go-ict/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/ultramcu/go-ict/graph/badge.svg)](https://codecov.io/gh/ultramcu/go-ict)
 [![Go Reference](https://pkg.go.dev/badge/github.com/ultramcu/go-ict.svg)](https://pkg.go.dev/github.com/ultramcu/go-ict)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ultramcu/go-ict)](https://goreportcard.com/report/github.com/ultramcu/go-ict)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
