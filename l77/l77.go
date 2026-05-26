@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tarm/serial"
+	"go.bug.st/serial"
 )
 
 // defaultBaud is the L77's documented serial baud rate. It is fixed
@@ -39,9 +39,6 @@ const readTimeout = 200 * time.Millisecond
 // the read loop with `go dev.Run()`. Stop with Close, which both
 // closes the serial port and signals Run to return.
 type Device struct {
-	// Configuration captured at New time; not mutated after.
-	cfg serial.Config
-
 	// Underlying serial port. nil if the port could not be opened
 	// (in which case New also returns the error). Typed as an
 	// interface so tests can inject a fake port.
@@ -121,7 +118,6 @@ func NewWithBaud(
 	logf Logf,
 ) (*Device, error) {
 	d := &Device{
-		cfg:              serial.Config{Name: port, Baud: baud, ReadTimeout: readTimeout},
 		escrowCallback:   escrowCb,
 		stackingCallback: stackingCb,
 		rejectCallback:   rejectCb,
@@ -132,9 +128,19 @@ func NewWithBaud(
 		done:             make(chan struct{}),
 	}
 
-	p, err := serial.OpenPort(&d.cfg)
+	p, err := serial.Open(port, &serial.Mode{
+		BaudRate: baud,
+		DataBits: 8,
+		Parity:   serial.NoParity,
+		StopBits: serial.OneStopBit,
+	})
 	if err != nil {
-		d.logL77("OpenPort %s @ %d failed: %v\r\n", port, baud, err)
+		d.logL77("open %s @ %d failed: %v\r\n", port, baud, err)
+		return d, err
+	}
+	if err := p.SetReadTimeout(readTimeout); err != nil {
+		_ = p.Close()
+		d.logL77("set read timeout on %s failed: %v\r\n", port, err)
 		return d, err
 	}
 	d.port = p

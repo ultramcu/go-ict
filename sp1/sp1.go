@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tarm/serial"
+	"go.bug.st/serial"
 )
 
 // queueCapacity is the size of the per-Device write queue. Every
@@ -49,7 +49,6 @@ const drainTickInterval = 1 * time.Millisecond
 // bytes into an internal queue that a single drainer goroutine
 // pulls from.
 type Device struct {
-	cfg serial.Config
 	// port is typed as an interface so tests can inject a fake.
 	port io.ReadWriteCloser
 
@@ -73,16 +72,25 @@ type Device struct {
 // Close must not be called when err != nil.
 func New(port string, baud int, logf Logf) (*Device, error) {
 	d := &Device{
-		cfg:   serial.Config{Name: port, Baud: baud, ReadTimeout: readTimeout},
 		queue: newByteQueue(queueCapacity),
 		timer: newElapsedTimer(),
 		done:  make(chan struct{}),
 		logf:  logf,
 	}
 
-	p, err := serial.OpenPort(&d.cfg)
+	p, err := serial.Open(port, &serial.Mode{
+		BaudRate: baud,
+		DataBits: 8,
+		Parity:   serial.NoParity,
+		StopBits: serial.OneStopBit,
+	})
 	if err != nil {
-		d.logSP1("OpenPort %s @ %d failed: %v\r\n", port, baud, err)
+		d.logSP1("open %s @ %d failed: %v\r\n", port, baud, err)
+		return d, err
+	}
+	if err := p.SetReadTimeout(readTimeout); err != nil {
+		_ = p.Close()
+		d.logSP1("set read timeout on %s failed: %v\r\n", port, err)
 		return d, err
 	}
 	d.port = p

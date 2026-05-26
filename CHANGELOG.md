@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.0] - 2026-05-26
+
+### Changed
+- **Serial backend swapped from `github.com/tarm/serial` to
+  `go.bug.st/serial` v1.7.0.** `tarm/serial` has been unmaintained since
+  2018; `go.bug.st/serial` is its actively-maintained successor. Ports are
+  now opened with `serial.Open` + an explicit `serial.Mode{BaudRate,
+  DataBits: 8, Parity: NoParity, StopBits: OneStopBit}` (8N1), and the read
+  timeout is applied via `SetReadTimeout` after open (the port is closed if
+  that call fails). **The public API of both `l77` and `sp1` is unchanged.**
+- **Minimum Go version is now 1.26** — the floor required by
+  `go.bug.st/serial` v1.7.0 (its module declares `go 1.26.0`) and the
+  transitive `golang.org/x/sys` v0.43.0. The v0.2.1 `x/sys` pin that kept
+  the Go 1.18 build is therefore obsolete and has been removed. The CI
+  go-version matrix is updated accordingly.
+
 ## [0.2.1] - 2026-05-24
 
 ### Fixed

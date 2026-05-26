@@ -16,7 +16,7 @@ talking over an RS-232 serial port.
 
 Both devices are common in self-service kiosks, ticket vending
 machines, and bill-payment boxes. The drivers are pure Go on top of
-[`github.com/tarm/serial`](https://github.com/tarm/serial), with no
+[`go.bug.st/serial`](https://github.com/bugst/go-serial), with no
 other third-party dependencies.
 
 ## Install
@@ -25,7 +25,7 @@ other third-party dependencies.
 go get github.com/ultramcu/go-ict
 ```
 
-Requires Go 1.18 or newer.
+Requires Go 1.26 or newer.
 
 ## L77 — bill acceptor
 

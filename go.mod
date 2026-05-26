@@ -1,7 +1,7 @@
 module github.com/ultramcu/go-ict
 
-go 1.18
+go 1.26.0
 
-require github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07
+require go.bug.st/serial v1.7.0
 
-require golang.org/x/sys v0.30.0 // indirect
+require golang.org/x/sys v0.43.0 // indirect
